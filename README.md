@@ -8,4 +8,5 @@ $$(max)$$
 
 ```
 pip3 install -r requirements.txt
+import "github.com/aws/aws-sdk-go"
 ```
