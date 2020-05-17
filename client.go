@@ -15,7 +15,7 @@ import (
 
 const (
 	// MaxResults is the maximun number of results to display per page
-	MaxResults = 40
+	MaxResults = 7
 )
 
 // User is an user...
@@ -39,6 +39,19 @@ const (
 type DbError struct {
 	ErrorCode   DbErrorCode
 	ErrorDetail string
+}
+
+// DbSession is ...
+type DbSession struct {
+	dynamoDBresource *dynamodb.DynamoDB
+}
+
+// UserSession does blah blah
+type UserSession struct {
+	dbSession        *DbSession
+	loggedUser       User
+	lastEvaluatedKey string
+	lastCommand      string
 }
 
 func (e DbError) Error() string {
@@ -66,9 +79,9 @@ func validateQueryOutputCount(count int64, queryOutput *dynamodb.QueryOutput) er
 	return nil
 }
 
-func dbListUsers(session *session.Session, lastEvaluatedKey string) ([]User, string, error) {
+func dbListUsers(dbSession *DbSession, lastEvaluatedKey string) ([]User, string, error) {
 
-	svc := dynamodb.New(session)
+	svc := dbSession.dynamoDBresource
 	var scanInput = new(dynamodb.ScanInput)
 	if lastEvaluatedKey == "" {
 		scanInput = &dynamodb.ScanInput{
@@ -109,8 +122,8 @@ func dbListUsers(session *session.Session, lastEvaluatedKey string) ([]User, str
 	return []User{}, lastEvaluatedKey, nil
 }
 
-func dbLogin(session *session.Session, email string) (string, error) {
-	svc := dynamodb.New(session)
+func Login(dbSession *DbSession, email string) (string, error) {
+	svc := dbSession.dynamoDBresource
 	input := &dynamodb.QueryInput{
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":v1": {
@@ -154,18 +167,10 @@ func dbLogin(session *session.Session, email string) (string, error) {
 func help() {
 	fmt.Print("" +
 		"Options:\n" +
-		"   help                    This menu\n" +
+		"   help                    Show options\n" +
 		"   users                   List users\n" +
 		"   login user@domain.com   Log in with user account\n" +
 		"   exit                    Exit application\n")
-}
-
-// UserSession does blah blah
-type UserSession struct {
-	awsSession       *session.Session
-	loggedUserID     string
-	lastEvaluatedKey string
-	lastCommand      string
 }
 
 func inputLoop(session *UserSession) {
@@ -174,7 +179,7 @@ func inputLoop(session *UserSession) {
 	var text string
 
 	for {
-		fmt.Printf("%s> ", session.loggedUserID)
+		fmt.Printf("%s> ", session.loggedUser.Email)
 		scanner = bufio.NewScanner(os.Stdin)
 		if err := scanner.Err(); err != nil {
 			log.Fatal(err)
@@ -192,7 +197,10 @@ func inputLoop(session *UserSession) {
 
 		// Users
 		case strings.HasPrefix(text, "users") || (session.lastCommand == "users" && text == "n"):
-			users, lastEvaluatedKey, err := dbListUsers(session.awsSession, session.lastEvaluatedKey)
+			if strings.HasPrefix(text, "users") {
+				session.lastEvaluatedKey = ""
+			}
+			users, lastEvaluatedKey, err := dbListUsers(session.dbSession, session.lastEvaluatedKey)
 			if err != nil {
 				fmt.Println(err)
 				break
@@ -207,9 +215,11 @@ func inputLoop(session *UserSession) {
 				if lastEvaluatedKey != "" && len(users) == MaxResults {
 					session.lastCommand = "users"
 					fmt.Println("Type 'n' to see more results")
+				} else {
+					fmt.Println("--- End of list ---")
 				}
 			} else {
-				fmt.Println("No further results")
+				fmt.Println("No further results. Type 'n' again to start from the beginning.")
 			}
 
 		// Login
@@ -219,11 +229,15 @@ func inputLoop(session *UserSession) {
 			}
 			email := text[len("login "):]
 			fmt.Printf("email: %s\n", email)
-			result, err := dbLogin(session.awsSession, email) // wgamble@fields.com
+			result, err := dbLogin(session.dbSession, email) // wgamble@fields.com
 			if err != nil {
 				fmt.Println(err)
+				break
 			}
-			session.loggedUserID = result
+			session.loggedUser = User{
+				ID:    result,
+				Email: email,
+			}
 			fmt.Println("Succesful login")
 			break
 
@@ -256,8 +270,11 @@ func main() {
 	help()
 
 	inputLoop(&UserSession{
-		awsSession: session,
+		dbSession: &DbSession{
+			dynamodb.New(session),
+		},
 	})
+
 }
 
 /*
