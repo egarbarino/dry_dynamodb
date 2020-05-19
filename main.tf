@@ -9,7 +9,6 @@ resource "aws_dynamodb_table" "dynamodb-table-users" {
   read_capacity  = 2 
   write_capacity = 2
   hash_key       = "id"
-//  range_key      = "GameTitle"
 
   attribute {
     name = "id"
@@ -20,12 +19,7 @@ resource "aws_dynamodb_table" "dynamodb-table-users" {
     name = "email"
     type = "S"
   }
-/*
-  ttl {
-    attribute_name = "TimeToExist"
-    enabled        = false
-  }
-*/
+  
   global_secondary_index {
     name               = "users_by_email"
     hash_key           = "email"
@@ -87,7 +81,7 @@ resource "aws_dynamodb_table" "dynamodb-table-lists" {
   }
 
   global_secondary_index {
-    name               = "list_by_user_id"
+    name               = "lists_by_user_id"
     hash_key           = "user_id"
     write_capacity     = 2 
     read_capacity      = 2 

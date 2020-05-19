@@ -1,15 +1,17 @@
 package memory
 
-import "github.com/egarbarino/dry_dynamodb/client_go/internal/model"
+import (
+	"github.com/egarbarino/dry_dynamodb/client_go/internal/model"
+)
 
-// MemorySession is blah
-type MemorySession struct {
+// Session is blah
+type Session struct {
 	users []model.User
 }
 
-// NewMemorySession does blah
-func NewMemorySession() *MemorySession {
-	return &MemorySession{
+// New does blah
+func New() *Session {
+	return &Session{
 		users: []model.User{
 			{
 				ID:    "7c2be6b9-746c-44be-bb33-78fb402ce6b8",
@@ -28,127 +30,77 @@ func NewMemorySession() *MemorySession {
 }
 
 // ListUsers does blah
-func (memorySession *MemorySession) ListUsers(lastEvaluatedKey string) ([]model.User, string, error) {
-	return memorySession.users, "", nil
-}
+func (memorySession *Session) ListUsers(lastUserID string, max int64) ([]model.User, string, error) {
+	var users = make([]model.User, max)
+	var counter int64 = 0
+	collecting := false
+	lastIndex := 0
+	lastSeenUserID := ""
 
-// LoginUser does blah
-func (memorySession *MemorySession) LoginUser(email string) (string, error) {
-	for _, v := range memorySession.users {
-		if v.Email == email {
-			return v.ID, nil
+	if lastUserID == "" {
+		collecting = true
+	}
+	for i, v := range memorySession.users {
+		if collecting {
+			users[counter] = v
+			lastSeenUserID = v.ID
+			lastIndex = i
+			counter++
+			if counter >= (max) {
+				break
+			}
+		}
+		if v.ID == lastUserID {
+			collecting = true
 		}
 	}
-	return "", &model.CustomError{
+	if lastIndex == len(memorySession.users)-1 {
+		lastSeenUserID = ""
+	}
+	return users, lastSeenUserID, nil
+}
+
+// GetUserByEmail ..
+func (memorySession *Session) GetUserByEmail(email string) (model.User, error) {
+	for _, v := range memorySession.users {
+		if v.Email == email {
+			return v, nil
+		}
+	}
+	return model.User{}, &model.CustomError{
 		ErrorCode:   model.ErrorNoMatch,
 		ErrorDetail: email,
 	}
 }
 
-/*
-const (
-	// MaxResults is the maximun number of results to display per page
-	MaxResults = 7
-)
-// DbSession is ...type DbSession struct { DynamoDBresource *dynamodb.DynamoDB
+// GetListsByUserID does blah
+func (memorySession *Session) GetListsByUserID(lastListID string) ([]model.List, error) {
+	return []model.List{}, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.GetLists",
+	}
 }
 
-func validateQueryOutputCount(count int64, queryOutput *dynamodb.QueryOutput) error {
-	if count != -1 {
-		if *queryOutput.Count != count {
-			return &model.CustomError{
-				ErrorCode:   model.ErrorInvalidCount,
-				ErrorDetail: fmt.Sprintf("intended=%d, actual=%d", count, *queryOutput.Count),
-			}
-		}
+// CreateList does blah
+func (memorySession *Session) CreateList(userID string, title string) (string, error) {
+	return "", &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.CreateList",
 	}
-	return nil
 }
 
-// ListUsers  does blah
-func (dbSession *DbSession) ListUsers(lastEvaluatedKey string) ([]model.User, string, error) {
-
-	svc := dbSession.DynamoDBresource
-	var scanInput = new(dynamodb.ScanInput)
-	if lastEvaluatedKey == "" {
-		scanInput = &dynamodb.ScanInput{
-			TableName: aws.String("users"),
-			Limit:     aws.Int64(MaxResults),
-		}
-	} else {
-		scanInput = &dynamodb.ScanInput{
-			TableName: aws.String("users"),
-			Limit:     aws.Int64(MaxResults),
-			ExclusiveStartKey: map[string]*dynamodb.AttributeValue{
-				"id": {
-					S: aws.String(lastEvaluatedKey),
-				},
-			},
-		}
+// DeleteList does blah
+func (memorySession *Session) DeleteList(listID string, userID string) error {
+	return &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.DeleteList",
 	}
-	scanOutput, err := svc.Scan(scanInput)
-	if err != nil {
-		return nil, "", err
-	}
-	if scanOutput.LastEvaluatedKey != nil {
-		lastEvaluatedKey = *scanOutput.LastEvaluatedKey["id"].S
-	} else {
-		lastEvaluatedKey = ""
-	}
-
-	if *scanOutput.Count > 0 {
-		var users = make([]model.User, *scanOutput.Count)
-		for index, scanItem := range scanOutput.Items {
-			err2 := dynamodbattribute.UnmarshalMap(scanItem, &users[index])
-			if err2 != nil {
-				return nil, "", err2
-			}
-		}
-		return users, lastEvaluatedKey, nil
-	}
-	return []model.User{}, lastEvaluatedKey, nil
 }
 
-// LoginUser does blah ....
-func (dbSession *DbSession) LoginUser(email string) (string, error) {
-	svc := dbSession.DynamoDBresource
-	input := &dynamodb.QueryInput{
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":v1": {
-				S: aws.String(email),
-			},
-		},
-		KeyConditionExpression: aws.String("email = :v1"),
-		ProjectionExpression:   aws.String("id"),
-		TableName:              aws.String("users"),
-		IndexName:              aws.String("users_by_email"),
-		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
+// GetListByListID does blah
+func (memorySession *Session) GetListByListID(listID string) (model.List, error) {
+	return model.List{}, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.GetListByListID",
 	}
-
-	queryOutput, err := svc.Query(input)
-	if err != nil {
-		return "", err
-	}
-	if *queryOutput.Count == 0 {
-		return "", &model.CustomError{
-			ErrorCode:   model.ErrorNoMatch,
-			ErrorDetail: email,
-		}
-	}
-	if err2 := validateQueryOutputCount(1, queryOutput); err2 != nil {
-		return "", err2
-	}
-
-	userIDAttribute, present := queryOutput.Items[0]["id"]
-	if !present {
-		return "", &model.CustomError{
-			ErrorCode:   model.ErrorMissingAttribute,
-			ErrorDetail: "id",
-		}
-	}
-
-	userID := *userIDAttribute.S
-	return userID, nil
-
 }
-*/
