@@ -16,12 +16,12 @@ type DBSession struct {
 	DynamoDBresource *dynamodb.DynamoDB
 }
 
-func validateQueryOutputCount(count int64, queryOutput *dynamodb.QueryOutput) error {
+func validateQueryOutputCount(count int64, output *dynamodb.QueryOutput) error {
 	if count != -1 {
-		if *queryOutput.Count != count {
+		if *output.Count != count {
 			return &model.CustomError{
 				ErrorCode:   model.ErrorInvalidCount,
-				ErrorDetail: fmt.Sprintf("intended=%d, actual=%d", count, *queryOutput.Count),
+				ErrorDetail: fmt.Sprintf("intended=%d, actual=%d", count, *output.Count),
 			}
 		}
 	}
@@ -29,10 +29,8 @@ func validateQueryOutputCount(count int64, queryOutput *dynamodb.QueryOutput) er
 }
 
 // ListUsers  does blah
-func (dbSession *DBSession) ListUsers(lastUserID string, max int64) ([]model.User, string, error) {
+func (session *DBSession) ListUsers(lastUserID string, max int64) ([]model.User, string, error) {
 
-	svc := dbSession.DynamoDBresource
-	var scanInput = new(dynamodb.ScanInput)
 	var exclusiveStartKey map[string]*dynamodb.AttributeValue
 
 	if lastUserID != "" {
@@ -44,24 +42,23 @@ func (dbSession *DBSession) ListUsers(lastUserID string, max int64) ([]model.Use
 	} else {
 		exclusiveStartKey = nil
 	}
-	scanInput = &dynamodb.ScanInput{
+	input := &dynamodb.ScanInput{
 		TableName:         aws.String("users"),
 		Limit:             aws.Int64(max),
 		ExclusiveStartKey: exclusiveStartKey,
 	}
-	scanOutput, err := svc.Scan(scanInput)
+	output, err := session.DynamoDBresource.Scan(input)
 	if err != nil {
 		return nil, "", err
 	}
-	if scanOutput.LastEvaluatedKey != nil {
-		lastUserID = *scanOutput.LastEvaluatedKey["id"].S
+	if output.LastEvaluatedKey != nil {
+		lastUserID = *output.LastEvaluatedKey["id"].S
 	} else {
 		lastUserID = ""
 	}
-
-	if *scanOutput.Count > 0 {
-		var users = make([]model.User, *scanOutput.Count)
-		for index, scanItem := range scanOutput.Items {
+	if *output.Count > 0 {
+		var users = make([]model.User, *output.Count)
+		for index, scanItem := range output.Items {
 			err2 := dynamodbattribute.UnmarshalMap(scanItem, &users[index])
 			if err2 != nil {
 				return nil, "", err2
@@ -72,9 +69,46 @@ func (dbSession *DBSession) ListUsers(lastUserID string, max int64) ([]model.Use
 	return []model.User{}, lastUserID, nil
 }
 
+// GetUsersByIDs does blah
+func (session *DBSession) GetUsersByIDs(ids []string) ([]model.User, error) {
+
+	var keys = make([]map[string]*dynamodb.AttributeValue, len(ids))
+	for i, v := range ids {
+		keys[i] = map[string]*dynamodb.AttributeValue{
+			"id": {
+				S: aws.String(v),
+			},
+		}
+	}
+	input := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]*dynamodb.KeysAndAttributes{
+			"users": {
+				Keys: keys,
+			},
+		},
+	}
+
+	output, err := session.DynamoDBresource.BatchGetItem(input)
+	if err != nil {
+		return []model.User{}, err
+	}
+
+	usersAttributes := output.Responses["users"]
+	if len(usersAttributes) > 0 {
+		var users = make([]model.User, len(usersAttributes))
+		for i, v := range usersAttributes {
+			if err = dynamodbattribute.UnmarshalMap(v, &users[i]); err != nil {
+				return []model.User{}, err
+			}
+		}
+		return users, nil
+	}
+	return []model.User{}, nil
+}
+
 // GetUserByEmail ..
-func (dbSession *DBSession) GetUserByEmail(email string) (model.User, error) {
-	svc := dbSession.DynamoDBresource
+func (session *DBSession) GetUserByEmail(email string) (model.User, error) {
+	svc := session.DynamoDBresource
 	input := &dynamodb.QueryInput{
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":v1": {
@@ -87,23 +121,23 @@ func (dbSession *DBSession) GetUserByEmail(email string) (model.User, error) {
 		IndexName:              aws.String("users_by_email"),
 		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 	}
-	queryOutput, err := svc.Query(input)
+	output, err := svc.Query(input)
 	if err != nil {
 		return model.User{}, err
 	}
-	if *queryOutput.Count == 0 {
+	if *output.Count == 0 {
 		return model.User{}, &model.CustomError{
 			ErrorCode:   model.ErrorNoMatch,
 			ErrorDetail: email,
 		}
 	}
-	if err2 := validateQueryOutputCount(1, queryOutput); err2 != nil {
+	if err2 := validateQueryOutputCount(1, output); err2 != nil {
 		return model.User{}, err2
 	}
 
 	var user model.User
 
-	if err3 := dynamodbattribute.UnmarshalMap(queryOutput.Items[0], &user); err3 != nil {
+	if err3 := dynamodbattribute.UnmarshalMap(output.Items[0], &user); err3 != nil {
 		return model.User{}, err3
 	}
 
@@ -113,9 +147,9 @@ func (dbSession *DBSession) GetUserByEmail(email string) (model.User, error) {
 }
 
 // GetListsByUserID does blah
-func (dbSession *DBSession) GetListsByUserID(userID string) ([]model.List, error) {
+func (session *DBSession) GetListsByUserID(userID string) ([]model.List, error) {
 
-	svc := dbSession.DynamoDBresource
+	svc := session.DynamoDBresource
 	input := &dynamodb.QueryInput{
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":v1": {
@@ -129,14 +163,14 @@ func (dbSession *DBSession) GetListsByUserID(userID string) ([]model.List, error
 		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 	}
 
-	queryOutput, err := svc.Query(input)
+	output, err := svc.Query(input)
 	if err != nil {
 		return []model.List{}, err
 	}
 
-	var lists = make([]model.List, *queryOutput.Count)
+	var lists = make([]model.List, *output.Count)
 
-	for i, v := range queryOutput.Items {
+	for i, v := range output.Items {
 		if err3 := dynamodbattribute.UnmarshalMap(v, &lists[i]); err3 != nil {
 			return []model.List{}, err3
 		}
@@ -145,7 +179,7 @@ func (dbSession *DBSession) GetListsByUserID(userID string) ([]model.List, error
 }
 
 // CreateList does ..
-func (dbSession *DBSession) CreateList(userID string, title string) (string, error) {
+func (session *DBSession) CreateList(userID string, title string) (string, error) {
 
 	uuidString := uuid.New().String()
 	// uuidString = "df7224d7-93aa-4395-bb96-aada170d55e1"
@@ -159,7 +193,7 @@ func (dbSession *DBSession) CreateList(userID string, title string) (string, err
 	if err != nil {
 		return "", err
 	}
-	svc := dbSession.DynamoDBresource
+	svc := session.DynamoDBresource
 	input := &dynamodb.PutItemInput{
 		TableName:           aws.String("lists"),
 		Item:                userAV,
@@ -181,7 +215,7 @@ func (dbSession *DBSession) CreateList(userID string, title string) (string, err
 }
 
 // DeleteList does blah
-func (dbSession *DBSession) DeleteList(listID string, userID string) error {
+func (session *DBSession) DeleteList(listID string, userID string) error {
 	input := &dynamodb.DeleteItemInput{
 		TableName: aws.String("lists"),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -197,7 +231,7 @@ func (dbSession *DBSession) DeleteList(listID string, userID string) error {
 		},
 	}
 
-	if _, err := dbSession.DynamoDBresource.DeleteItem(input); err != nil {
+	if _, err := session.DynamoDBresource.DeleteItem(input); err != nil {
 		if aeer, ok := err.(awserr.Error); ok {
 			if aeer.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
 				return &model.CustomError{
@@ -212,7 +246,7 @@ func (dbSession *DBSession) DeleteList(listID string, userID string) error {
 }
 
 // GetListByListID does blah
-func (dbSession *DBSession) GetListByListID(listID string) (model.List, error) {
+func (session *DBSession) GetListByListID(listID string) (model.List, error) {
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String("lists"),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -221,22 +255,116 @@ func (dbSession *DBSession) GetListByListID(listID string) (model.List, error) {
 			},
 		},
 	}
-	output, err := dbSession.DynamoDBresource.GetItem(input)
+	output, err := session.DynamoDBresource.GetItem(input)
 	if err != nil {
-		if aeer, ok := err.(awserr.Error); ok {
-			if aeer.Code() == dynamodb.ErrCodeResourceNotFoundException {
-				return model.List{}, &model.CustomError{
-					ErrorCode:   model.ErrorNoMatch,
-					ErrorDetail: listID,
-				}
-			}
-		}
+		return model.List{}, err
 	}
+
 	var list model.List
 
 	if err2 := dynamodbattribute.UnmarshalMap(output.Item, &list); err2 != nil {
 		return model.List{}, err2
 	}
+	if list.ID == "" {
+		return model.List{}, &model.CustomError{
+			ErrorCode:   model.ErrorNoMatch,
+			ErrorDetail: listID,
+		}
+	}
 
 	return list, nil
+}
+
+// GetAggregateGuestsByListID is blah
+func (session *DBSession) GetAggregateGuestsByListID(listID string) ([]model.Guest, error) {
+	guests, err := session.GetGuestsByListID(listID)
+	if err != nil {
+		return []model.Guest{}, err
+	}
+	var userIDs = make([]string, len(guests))
+	for i, v := range guests {
+		userIDs[i] = v.UserID
+	}
+	if len(userIDs) > 0 {
+		users, err2 := session.GetUsersByIDs(userIDs)
+		fmt.Println(users)
+		if err2 != nil {
+			return []model.Guest{}, err2
+		}
+		for ig, vg := range guests {
+			for _, vu := range users {
+				if vg.UserID == vu.ID {
+					guests[ig].AggregateEmail = vu.Email
+				}
+			}
+		}
+	}
+	// fmt.Println(guests)
+	return guests, nil
+}
+
+// GetGuestsByListID does blah
+func (session *DBSession) GetGuestsByListID(listID string) ([]model.Guest, error) {
+
+	input := &dynamodb.QueryInput{
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":v1": {
+				S: aws.String(listID),
+			},
+		},
+		KeyConditionExpression: aws.String("list_id = :v1"),
+		TableName:              aws.String("guests"),
+		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
+	}
+
+	output, err := session.DynamoDBresource.Query(input)
+	if err != nil {
+		return []model.Guest{}, err
+	}
+
+	var guests = make([]model.Guest, *output.Count)
+
+	for i, v := range output.Items {
+		if err3 := dynamodbattribute.UnmarshalMap(v, &guests[i]); err3 != nil {
+			return []model.Guest{}, err3
+		}
+	}
+	return guests, nil
+}
+
+// GetGuestsByIDs does blah
+func (session *DBSession) GetXXXGuestsByIDs(ids []string) ([]model.User, error) {
+
+	var keys = make([]map[string]*dynamodb.AttributeValue, len(ids))
+	for i, v := range ids {
+		keys[i] = map[string]*dynamodb.AttributeValue{
+			"id": {
+				S: aws.String(v),
+			},
+		}
+	}
+	input := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]*dynamodb.KeysAndAttributes{
+			"users": {
+				Keys: keys,
+			},
+		},
+	}
+
+	output, err := session.DynamoDBresource.BatchGetItem(input)
+	if err != nil {
+		return []model.User{}, err
+	}
+
+	usersAttributes := output.Responses["users"]
+	if len(usersAttributes) > 0 {
+		var users = make([]model.User, len(usersAttributes))
+		for i, v := range usersAttributes {
+			if err = dynamodbattribute.UnmarshalMap(v, &users[i]); err != nil {
+				return []model.User{}, err
+			}
+		}
+		return users, nil
+	}
+	return []model.User{}, nil
 }

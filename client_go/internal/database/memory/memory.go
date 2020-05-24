@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"fmt"
+
 	"github.com/egarbarino/dry_dynamodb/client_go/internal/model"
 )
 
@@ -31,7 +33,7 @@ func New() *Session {
 
 // ListUsers does blah
 func (memorySession *Session) ListUsers(lastUserID string, max int64) ([]model.User, string, error) {
-	var users = make([]model.User, max)
+	var users = make([]model.User, 0)
 	var counter int64 = 0
 	collecting := false
 	lastIndex := 0
@@ -42,7 +44,7 @@ func (memorySession *Session) ListUsers(lastUserID string, max int64) ([]model.U
 	}
 	for i, v := range memorySession.users {
 		if collecting {
-			users[counter] = v
+			users = append(users, v)
 			lastSeenUserID = v.ID
 			lastIndex = i
 			counter++
@@ -58,6 +60,25 @@ func (memorySession *Session) ListUsers(lastUserID string, max int64) ([]model.U
 		lastSeenUserID = ""
 	}
 	return users, lastSeenUserID, nil
+}
+
+// GetUsersByIDs is blah
+func (memorySession *Session) GetUsersByIDs(ids []string) ([]model.User, error) {
+	users := make([]model.User, 1)
+	for _, u := range memorySession.users {
+		for _, id := range ids {
+			if u.ID == id {
+				users = append(users, u)
+			}
+		}
+	}
+	if len(users) > 0 {
+		return users, nil
+	}
+	return []model.User{}, &model.CustomError{
+		ErrorCode:   model.ErrorNoMatch,
+		ErrorDetail: fmt.Sprintf("%v", ids),
+	}
 }
 
 // GetUserByEmail ..
@@ -102,5 +123,21 @@ func (memorySession *Session) GetListByListID(listID string) (model.List, error)
 	return model.List{}, &model.CustomError{
 		ErrorCode:   model.ErrorUnimplemented,
 		ErrorDetail: "Interface.GetListByListID",
+	}
+}
+
+// GetAggregateGuestsByListID does blah
+func (memorySession *Session) GetAggregateGuestsByListID(listID string) ([]model.Guest, error) {
+	return []model.Guest{}, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.GetAggregateGuestsByUserID",
+	}
+}
+
+// GetGuestsByListID does blah
+func (memorySession *Session) GetGuestsByListID(listID string) ([]model.Guest, error) {
+	return []model.Guest{}, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.GetGuestsByUserID",
 	}
 }
