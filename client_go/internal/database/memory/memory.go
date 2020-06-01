@@ -94,11 +94,19 @@ func (memorySession *Session) GetUserByEmail(email string) (model.User, error) {
 	}
 }
 
+// GetAggregateListsByUserID does blah
+func (memorySession *Session) GetAggregateListsByUserID(lastListID string) ([]model.AggregateList, error) {
+	return []model.AggregateList{}, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.GetAggregateListsByUserID",
+	}
+}
+
 // GetListsByUserID does blah
 func (memorySession *Session) GetListsByUserID(lastListID string) ([]model.List, error) {
 	return []model.List{}, &model.CustomError{
 		ErrorCode:   model.ErrorUnimplemented,
-		ErrorDetail: "Interface.GetLists",
+		ErrorDetail: "Interface.GetListsByUserID",
 	}
 }
 
@@ -138,6 +146,62 @@ func (memorySession *Session) GetAggregateGuestsByListID(listID string) ([]model
 func (memorySession *Session) GetGuestsByListID(listID string) ([]model.Guest, error) {
 	return []model.Guest{}, &model.CustomError{
 		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.GetGuestsByListID",
+	}
+}
+
+// GetGuestsByUserID does blah
+func (memorySession *Session) GetGuestsByUserID(userID string) ([]model.Guest, error) {
+	return []model.Guest{}, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
 		ErrorDetail: "Interface.GetGuestsByUserID",
+	}
+}
+
+// CreateGuest does blah
+func (memorySession *Session) CreateGuest(listID string, userID string) error {
+	return &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.CreateGuest",
+	}
+}
+
+// DeleteGuest does blah
+func (memorySession *Session) DeleteGuest(listID string, userID string) error {
+	return &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.DeleteGuest",
+	}
+}
+
+// IsPresentGuest does blah
+func (memorySession *Session) IsPresentGuest(listID string, userID string) (bool, error) {
+	return false, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.IsPresentGuest",
+	}
+}
+
+// GetItemsByListID does blah
+func (memorySession *Session) GetItemsByListID(listID string) ([]model.Item, error) {
+	return []model.Item{}, &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.GetItemsByListID",
+	}
+}
+
+// CreateItem does ..
+func (memorySession *Session) CreateItem(listID string, description string) error {
+	return &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.CreateItem",
+	}
+}
+
+// DeleteItem does ..
+func (memorySession *Session) DeleteItem(listID string, datetime string) error {
+	return &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.DeleteItem",
 	}
 }

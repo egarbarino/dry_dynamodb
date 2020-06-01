@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -46,7 +45,12 @@ func help() {
 		"   list create NAME        Create a new list\n" +
 		"   list delete ListID      Delete existing list\n" +
 		"Once a list is selected\n" +
-		"   guests                  List guests invited to the list\n")
+		"   guests                  List guests invited to the list\n" +
+		"   guest add UserID        Add a guest to the list\n" +
+		"   guest remove UserID     Remove guest from the list\n" +
+		"   items                   Show items in the list\n" +
+		"   item create description Create a new item\n" +
+		"   item delete datetime    Delete item by datetimem\n")
 }
 
 func inputLoop(session *UserSession) {
@@ -109,7 +113,7 @@ func inputLoop(session *UserSession) {
 				fmt.Printf("%-4s %-37s  %-50s\n", "Seq", "UserID", "Email")
 				fmt.Printf("%-4s %-37s  %-50s\n", "---", "------", "-----")
 				for _, user := range users {
-					fmt.Printf("%03d  %-37s  %-50s\n", session.sequenceCounter, user.ID, user.Email)
+					fmt.Printf("%3d  %-37s  %-50s\n", session.sequenceCounter, user.ID, user.Email)
 					session.sequenceList[session.sequenceCounter] = user.ID
 					session.sequenceCounter++
 				}
@@ -167,58 +171,25 @@ func inputLoop(session *UserSession) {
 				fmt.Println("This command requires a logged user via the login command")
 				break
 			}
-
-			lists, err := session.backend.GetListsByUserID(session.loggedUser.ID)
+			lists, err := session.backend.GetAggregateListsByUserID(session.loggedUser.ID)
 			if err != nil {
 				fmt.Println(err)
 				break
 			}
-
-			var waitGroup sync.WaitGroup
-
-			guestsChan := make(chan []model.Guest, len(lists))
-			errorsChan := make(chan error, len(lists))
-
-			for _, list := range lists {
-				waitGroup.Add(1)
-				go func(waitGroup *sync.WaitGroup, list model.List) {
-					guests, err := session.backend.GetGuestsByListID(list.ID)
-					if err != nil {
-						errorsChan <- err
-					} else {
-						errorsChan <- nil
-						guestsChan <- guests
-					}
-					waitGroup.Done()
-				}(&waitGroup, list)
-			}
-			waitGroup.Wait()
-			var errorStr string
-			close(errorsChan)
-			close(guestsChan)
-			for err := range errorsChan {
-				if err != nil {
-					errorStr += fmt.Sprintf("%v\n", err)
-				}
-			}
-			if errorStr != "" {
-				fmt.Print(errorStr)
-				break
-			}
-			for guests := range guestsChan {
-				for i, list := range lists {
-					if len(guests) > 0 && guests[0].ListID == list.ID {
-						lists[i].AggregateGuestCount = len(guests)
-					}
-				}
-			}
-
-			//lists[i].AggregateGuestCount = len(guests)
 			if len(lists) > 0 {
-				fmt.Printf("%-4s %-37s  %-4s  %-50s\n", "Seq", "ListID", "Guests", "Title")
-				fmt.Printf("%-4s %-37s  %-4s  %-50s\n", "---", "------", "------", "-----")
+
+				var listType string
+
+				fmt.Printf("%-3s %-36s %-5s %-6s %-5s %-50s\n", "Seq", "ListID", "Type", "Guests", "Items", "Title")
+				fmt.Printf("%-3s %-36s %-5s %-6s %-5s %-50s\n", "---", "------", "----", "------", "-----", "-----")
+
 				for _, list := range lists {
-					fmt.Printf("%03d  %-37s  %02d      %-50s\n", session.sequenceCounter, list.ID, list.AggregateGuestCount, list.Title)
+					if list.AsGuest {
+						listType = "Guest"
+					} else {
+						listType = "Owner"
+					}
+					fmt.Printf("%3d %-36s %-5s %6d %5d %-50s\n", session.sequenceCounter, list.ID, listType, list.GuestCount, list.ItemCount, list.Title)
 					session.sequenceList[session.sequenceCounter] = list.ID
 					session.sequenceCounter++
 				}
@@ -264,25 +235,30 @@ func inputLoop(session *UserSession) {
 		// Guests
 		case strings.HasPrefix(text, "guests"):
 			if session.loggedUser.ID == "" {
-				fmt.Println("This command requires a logged user via the 'login' command")
+				fmt.Println("This command requires a current user via the 'user UserID' command")
 				break
 			}
 			if session.selectedList.ID == "" {
-				fmt.Println("This command requires a a selected list via the 'list select' command")
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
 				break
 			}
-			guests, err := session.backend.GetGuestsByListID(session.selectedList.ID)
+			guests, err := session.backend.GetAggregateGuestsByListID(session.selectedList.ID)
 			if err != nil {
 				fmt.Println(err)
 				break
 			}
 			if len(guests) > 0 {
-				fmt.Printf("%-4s %-37s  %-50s\n", "$n", "UserID", "Email")
-				fmt.Printf("%-4s %-37s  %-50s\n", "--", "------", "-----")
-				for i, guest := range guests {
-					fmt.Printf("%2d   %-37s  %-50s\n", i, guest.UserID, guest.AggregateEmail)
+				fmt.Printf("%-4s %-37s  %-50s\n", "Seq", "UserID", "Email")
+				fmt.Printf("%-4s %-37s  %-50s\n", "---", "------", "-----")
+				for _, guest := range guests {
+					fmt.Printf("%3d  %-37s  %-50s\n", session.sequenceCounter, guest.UserID, guest.AggregateEmail)
+					session.sequenceList[session.sequenceCounter] = guest.UserID
+					session.sequenceCounter++
+
 				}
-				fmt.Println("Type $n (for example $1) to select a list")
+				fmt.Println("---")
+				fmt.Printf("Use Seq numbers in lieu of IDs. For example, 'guest remove $%d'\n", session.sequenceCounter-1)
+
 			}
 
 		// List Select
@@ -302,10 +278,135 @@ func inputLoop(session *UserSession) {
 				break
 			}
 			if list.UserID != session.loggedUser.ID {
-				fmt.Println("This list does not belong to you!")
-				break
+				isPresent, err := session.backend.IsPresentGuest(listID, session.loggedUser.ID)
+				if err != nil {
+					fmt.Println(err)
+				}
+				if !isPresent {
+					fmt.Println("This list does not belong to you and you are not a guest in it either!")
+					break
+				}
 			}
 			session.selectedList = list
+
+		// Add Guest
+		case strings.HasPrefix(text, "guest add"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("guest add _") {
+				fmt.Println("No guest specified")
+				break
+			}
+			userID := text[len("guest add "):]
+			if userID == session.loggedUser.ID {
+				fmt.Println("You can't add yourself to the guest list")
+				break
+			}
+			err := session.backend.CreateGuest(session.selectedList.ID, userID)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+
+		case strings.HasPrefix(text, "guest remove"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("guest remove _") {
+				fmt.Println("No guest specified")
+				break
+			}
+			userID := text[len("guest remove "):]
+			err := session.backend.DeleteGuest(session.selectedList.ID, userID) // CHECK IF USER EXISTS!!!!
+			if err != nil {
+				fmt.Println(err)
+			}
+
+		case strings.HasPrefix(text, "items"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			items, err := session.backend.GetItemsByListID(session.selectedList.ID)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+			if len(items) > 0 {
+
+				var done string
+
+				fmt.Printf("%-3s %-27s %-7s %s\n", "Seq", "Datetime", "Done", "Description")
+				fmt.Printf("%-3s %-27s %-7s %s\n", "---", "--------", "----", "-----------")
+
+				for _, item := range items {
+					if item.Done {
+						done = "Done"
+					} else {
+						done = "Pending"
+					}
+					fmt.Printf("%3d %-27s %-7s %s\n", session.sequenceCounter, item.Datetime, done, item.Description)
+					session.sequenceList[session.sequenceCounter] = item.Datetime
+					session.sequenceCounter++
+				}
+				fmt.Println("---")
+				fmt.Printf("Use Seq numbers in lieu of IDs. For example, 'item delete $%d'\n", session.sequenceCounter-1)
+			}
+
+		case strings.HasPrefix(text, "item create"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("item create _") {
+				fmt.Println("No description specified")
+				break
+			}
+			description := text[len("item create "):]
+			err := session.backend.CreateItem(session.selectedList.ID, description)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+
+		case strings.HasPrefix(text, "item delete"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("item delete _") {
+				fmt.Println("No datetime specified")
+				break
+			}
+			datetime := text[len("item delete "):]
+			err := session.backend.DeleteItem(session.selectedList.ID, datetime)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
 
 		// Exit
 		case strings.HasPrefix(text, "exit"):
@@ -345,7 +446,6 @@ func main() {
 	}
 
 	help()
-
 	inputLoop(&UserSession{
 		backend: backend,
 	})

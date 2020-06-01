@@ -20,16 +20,17 @@ type User struct {
 
 // List is blah blah
 type List struct {
-	ID                  string `json:"id"`
-	Title               string `json:"title"`
-	UserID              string `json:"user_id"`
-	AggregateGuestCount int
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	UserID string `json:"user_id"`
 }
 
 // AggregateList is blah blah
 type AggregateList struct {
 	List
-	AggregateGuestCount int
+	GuestCount int
+	ItemCount  int
+	AsGuest    bool
 }
 
 // Guest is blah
@@ -38,6 +39,15 @@ type Guest struct {
 	UserID string `json:"user_id"`
 	// Field not populated directly from Table
 	AggregateEmail string
+}
+
+// Item does blah
+type Item struct {
+	ListID      string `json:"list_id"`
+	Datetime    string `json:"datetime"`
+	Description string `json:"description"`
+	Done        bool   `json:"done"`
+	Order       int    `json:"order"`
 }
 
 // ErrorCode is used for the dbError... enumeration
@@ -72,9 +82,17 @@ type Interface interface {
 	GetUsersByIDs(ids []string) ([]User, error)
 	GetUserByEmail(email string) (User, error)
 	GetListByListID(listID string) (List, error)
+	GetAggregateListsByUserID(userID string) ([]AggregateList, error)
 	GetListsByUserID(userID string) ([]List, error)
 	CreateList(userID string, title string) (string, error)
 	DeleteList(listID string, userID string) error
 	GetAggregateGuestsByListID(listID string) ([]Guest, error)
 	GetGuestsByListID(listID string) ([]Guest, error)
+	GetGuestsByUserID(userID string) ([]Guest, error)
+	CreateGuest(listID string, userID string) error
+	DeleteGuest(listID string, userID string) error
+	IsPresentGuest(listID string, userID string) (bool, error)
+	GetItemsByListID(listID string) ([]Item, error)
+	CreateItem(listID string, description string) error
+	DeleteItem(listID string, description string) error
 }
