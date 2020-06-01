@@ -562,12 +562,49 @@ func (session *DBSession) CreateGuest(listID string, userID string) error {
 	if err != nil {
 		return err
 	}
-	input := &dynamodb.PutItemInput{
-		TableName:           aws.String("guests"),
-		Item:                guestAV,
-		ConditionExpression: aws.String("attribute_not_exists(id)"),
+	/*
+		input := &dynamodb.PutItemInput{
+			TableName:           aws.String("guests"),
+			Item:                guestAV,
+			ConditionExpression: aws.String("attribute_not_exists(id)"),
+		}
+	*/
+	input2 := &dynamodb.TransactWriteItemsInput{
+		TransactItems: []*dynamodb.TransactWriteItem{
+			{
+				ConditionCheck: &dynamodb.ConditionCheck{
+
+					TableName: aws.String("lists"),
+					Key: map[string]*dynamodb.AttributeValue{
+						"id": {
+							S: aws.String(listID),
+						},
+					},
+					ConditionExpression: aws.String("attribute_exists(id)"),
+				},
+			},
+			{
+				ConditionCheck: &dynamodb.ConditionCheck{
+
+					TableName: aws.String("users"),
+					Key: map[string]*dynamodb.AttributeValue{
+						"id": {
+							S: aws.String(userID),
+						},
+					},
+					ConditionExpression: aws.String("attribute_exists(id)"),
+				},
+			},
+			{
+				Put: &dynamodb.Put{
+					TableName:           aws.String("guests"),
+					Item:                guestAV,
+					ConditionExpression: aws.String("attribute_not_exists(id)"),
+				},
+			},
+		},
 	}
-	_, err2 := session.DynamoDBresource.PutItem(input)
+	_, err2 := session.DynamoDBresource.PutItem(input2)
 	if err2 != nil {
 		if aerr, ok := err2.(awserr.Error); ok {
 			if aerr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
@@ -666,7 +703,7 @@ func (session *DBSession) CreateItem(listID string, description string) error {
 	if err != nil {
 		return err
 	}
-	input2 := &dynamodb.TransactWriteItemsInput{
+	input := &dynamodb.TransactWriteItemsInput{
 		TransactItems: []*dynamodb.TransactWriteItem{
 			{
 				ConditionCheck: &dynamodb.ConditionCheck{
@@ -691,17 +728,8 @@ func (session *DBSession) CreateItem(listID string, description string) error {
 			},
 		},
 	}
-	/*
-		input := &dynamodb.PutItemInput{
-			TableName:           aws.String("items"),
-			Item:                itemAV,
-			ConditionExpression: aws.String("attribute_not_exists(list_id) AND attribute_not_exists(#d)"),
-			ExpressionAttributeNames: map[string]*string{
-				"#d": aws.String("datetime"),
-			},
-		}
-	*/
-	_, err2 := session.DynamoDBresource.TransactWriteItems(input2)
+
+	_, err2 := session.DynamoDBresource.TransactWriteItems(input)
 	if err2 != nil {
 		if aerr, ok := err2.(awserr.Error); ok {
 			if aerr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
