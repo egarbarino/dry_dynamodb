@@ -7,13 +7,13 @@ import datetime
 import time
 import random
 
-USERS = 10
+USERS = 50
 LISTS_PER_USER = 3 
 ITEMS_PER_LIST = 3
 GUESTS_PER_USER = 3
 
 WRU_UPLOAD = 2 
-WRU_DEFAULT = 2
+WRU_DEFAULT = 1
 
 faker = Faker()
 session = boto3.Session(profile_name='dynamodb_profile')
@@ -125,7 +125,8 @@ with users_table.batch_writer() as users_batch:
                 'datetime' : item_datetime, 
                 'description' : item_description,
                 'done' : item_done, 
-                'order' : item_order}
+                'order' : item_order,
+                'version' : 0}
               print('item|{}'.format(item_item))
 
               while last_item_datetime == item_datetime:

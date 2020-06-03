@@ -33,24 +33,25 @@ type UserSession struct {
 func help() {
 	fmt.Print("" +
 		"General Options:\n" +
-		"   help                    Show options\n" +
-		"   users                   List users\n" +
-		"   user UserID             Select UserID\n" +
-		"   email user@domain.com   Select User by Email\n" +
-		"   seq                     Reset sequence counter\n" +
-		"   exit                    Exit application\n" +
+		"   help                                 Show options\n" +
+		"   users                                List users\n" +
+		"   user UserID                          Select UserID\n" +
+		"   email user@domain.com                Select User by Email\n" +
+		"   seq                                  Reset sequence counter\n" +
+		"   exit                                 Exit application\n" +
 		"Once a user is selected\n" +
-		"   lists                   Show User's To Do lists\n" +
-		"   list ListID             Select a List\n" +
-		"   list create NAME        Create a new list\n" +
-		"   list delete ListID      Delete existing list\n" +
+		"   lists                                Show User's To Do lists\n" +
+		"   list ListID                          Select a List\n" +
+		"   list create NAME                     Create a new list\n" +
+		"   list delete ListID                   Delete existing list\n" +
 		"Once a list is selected\n" +
-		"   guests                  List guests invited to the list\n" +
-		"   guest add UserID        Add a guest to the list\n" +
-		"   guest remove UserID     Remove guest from the list\n" +
-		"   items                   Show items in the list\n" +
-		"   item create description Create a new item\n" +
-		"   item delete datetime    Delete item by datetimem\n")
+		"   guests                               List guests invited to the list\n" +
+		"   guest add UserID                     Add a guest to the list\n" +
+		"   guest remove UserID                  Remove guest from the list\n" +
+		"   items                                Show items in the list\n" +
+		"   item create description              Create a new item\n" +
+		"   item delete datetime                 Delete item by datetimem\n" +
+		"   item rename datetime new_description Change item's description\n")
 }
 
 func inputLoop(session *UserSession) {
@@ -351,8 +352,8 @@ func inputLoop(session *UserSession) {
 
 				var done string
 
-				fmt.Printf("%-3s %-27s %-7s %s\n", "Seq", "Datetime", "Done", "Description")
-				fmt.Printf("%-3s %-27s %-7s %s\n", "---", "--------", "----", "-----------")
+				fmt.Printf("%-3s %-27s %-6s %-7s %s\n", "Seq", "Datetime", "Version", "Done", "Description")
+				fmt.Printf("%-3s %-27s %-6s %-7s %s\n", "---", "--------", "-------", "----", "-----------")
 
 				for _, item := range items {
 					if item.Done {
@@ -360,7 +361,7 @@ func inputLoop(session *UserSession) {
 					} else {
 						done = "Pending"
 					}
-					fmt.Printf("%3d %-27s %-7s %s\n", session.sequenceCounter, item.Datetime, done, item.Description)
+					fmt.Printf("%3d %-27s %-6d %-7s %s\n", session.sequenceCounter, item.Datetime, item.Version, done, item.Description)
 					session.sequenceList[session.sequenceCounter] = item.Datetime
 					session.sequenceCounter++
 				}
@@ -403,6 +404,33 @@ func inputLoop(session *UserSession) {
 			}
 			datetime := text[len("item delete "):]
 			err := session.backend.DeleteItem(session.selectedList.ID, datetime)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+
+		case strings.HasPrefix(text, "item rename"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("item rename _") {
+				fmt.Println("No arguments provided")
+				break
+			}
+			argumentStr := text[len("item rename "):]
+			arguments := strings.Split(argumentStr, " ")
+			if len(arguments) != 2 {
+				fmt.Println("Invalid number of arguments")
+				break
+			}
+			datetime := arguments[0]
+			description := arguments[1]
+			err := session.backend.UpdateItem(session.selectedList.ID, datetime, 0, description)
 			if err != nil {
 				fmt.Println(err)
 				break

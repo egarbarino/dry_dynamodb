@@ -48,6 +48,7 @@ type Item struct {
 	Description string `json:"description"`
 	Done        bool   `json:"done"`
 	Order       int    `json:"order"`
+	Version     int    `json:"version"`
 }
 
 // ErrorCode is used for the dbError... enumeration
@@ -94,5 +95,6 @@ type Interface interface {
 	IsPresentGuest(listID string, userID string) (bool, error)
 	GetItemsByListID(listID string) ([]Item, error)
 	CreateItem(listID string, description string) error
-	DeleteItem(listID string, description string) error
+	DeleteItem(listID string, datetime string) error
+	UpdateItem(listID string, datetime string, version int, description string) error
 }

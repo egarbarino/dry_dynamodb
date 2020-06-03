@@ -205,3 +205,11 @@ func (memorySession *Session) DeleteItem(listID string, datetime string) error {
 		ErrorDetail: "Interface.DeleteItem",
 	}
 }
+
+// UpdateItem does ..
+func (memorySession *Session) UpdateItem(listID string, datetime string, version int, description string) error {
+	return &model.CustomError{
+		ErrorCode:   model.ErrorUnimplemented,
+		ErrorDetail: "Interface.UpdateItem",
+	}
+}

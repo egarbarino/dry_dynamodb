@@ -309,8 +309,7 @@ func (session *DBSession) GetListsByUserID(userID string) ([]model.List, error) 
 func (session *DBSession) CreateList(userID string, title string) (string, error) {
 
 	uuidString := uuid.New().String()
-	// uuidString = "df7224d7-93aa-4395-bb96-aada170d55e1"
-
+	//uuidString = "df7224d7-93aa-4395-bb96-aada170d55e1"
 	user := model.List{
 		ID:     uuidString,
 		Title:  title,
@@ -320,20 +319,49 @@ func (session *DBSession) CreateList(userID string, title string) (string, error
 	if err != nil {
 		return "", err
 	}
-	input := &dynamodb.PutItemInput{
-		TableName:           aws.String("lists"),
-		Item:                userAV,
-		ConditionExpression: aws.String("attribute_not_exists(id)"),
+
+	input := &dynamodb.TransactWriteItemsInput{
+		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
+		TransactItems: []*dynamodb.TransactWriteItem{
+			{
+				ConditionCheck: &dynamodb.ConditionCheck{
+
+					TableName: aws.String("users"),
+					Key: map[string]*dynamodb.AttributeValue{
+						"id": {
+							S: aws.String(userID),
+						},
+					},
+					ConditionExpression: aws.String("attribute_exists(id)"),
+				},
+			},
+			{
+				Put: &dynamodb.Put{
+					TableName:           aws.String("lists"),
+					Item:                userAV,
+					ConditionExpression: aws.String("attribute_not_exists(id)"),
+				},
+			},
+		},
 	}
-	_, err2 := session.DynamoDBresource.PutItem(input)
+
+	_, err2 := session.DynamoDBresource.TransactWriteItems(input)
 	if err2 != nil {
-		if aerr, ok := err2.(awserr.Error); ok {
-			if aerr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
+		switch v := err2.(type) {
+		case *dynamodb.TransactionCanceledException:
+			switch {
+			case len(v.CancellationReasons) > 0 && *v.CancellationReasons[0].Code == "ConditionalCheckFailed":
+				return "", &model.CustomError{
+					ErrorCode:   model.ErrorNoMatch,
+					ErrorDetail: fmt.Sprintf("userID=%s", userID),
+				}
+			case len(v.CancellationReasons) > 1 && *v.CancellationReasons[1].Code == "ConditionalCheckFailed":
 				return "", &model.CustomError{
 					ErrorCode:   model.ErrorDuplicateID,
-					ErrorDetail: uuidString,
+					ErrorDetail: fmt.Sprintf("listID=%s", uuidString),
 				}
 			}
+		default:
 			return "", err2
 		}
 	}
@@ -551,9 +579,6 @@ func (session *DBSession) IsPresentGuest(listID string, userID string) (bool, er
 // CreateGuest does ..
 func (session *DBSession) CreateGuest(listID string, userID string) error {
 
-	uuidString := uuid.New().String()
-	// uuidString = "df7224d7-93aa-4395-bb96-aada170d55e1"
-
 	guest := model.Guest{
 		ListID: listID,
 		UserID: userID,
@@ -562,16 +587,12 @@ func (session *DBSession) CreateGuest(listID string, userID string) error {
 	if err != nil {
 		return err
 	}
-	/*
-		input := &dynamodb.PutItemInput{
-			TableName:           aws.String("guests"),
-			Item:                guestAV,
-			ConditionExpression: aws.String("attribute_not_exists(id)"),
-		}
-	*/
-	input2 := &dynamodb.TransactWriteItemsInput{
+
+	input := &dynamodb.TransactWriteItemsInput{
+		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 		TransactItems: []*dynamodb.TransactWriteItem{
 			{
+
 				ConditionCheck: &dynamodb.ConditionCheck{
 
 					TableName: aws.String("lists"),
@@ -599,20 +620,33 @@ func (session *DBSession) CreateGuest(listID string, userID string) error {
 				Put: &dynamodb.Put{
 					TableName:           aws.String("guests"),
 					Item:                guestAV,
-					ConditionExpression: aws.String("attribute_not_exists(id)"),
+					ConditionExpression: aws.String("attribute_not_exists(list_id) AND attribute_not_exists(user_id)"),
 				},
 			},
 		},
 	}
-	_, err2 := session.DynamoDBresource.PutItem(input2)
+	_, err2 := session.DynamoDBresource.TransactWriteItems(input)
 	if err2 != nil {
-		if aerr, ok := err2.(awserr.Error); ok {
-			if aerr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
+		switch v := err2.(type) {
+		case *dynamodb.TransactionCanceledException:
+			switch {
+			case len(v.CancellationReasons) > 0 && *v.CancellationReasons[0].Code == "ConditionalCheckFailed":
+				return &model.CustomError{
+					ErrorCode:   model.ErrorNoMatch,
+					ErrorDetail: fmt.Sprintf("listID=%s", listID),
+				}
+			case len(v.CancellationReasons) > 1 && *v.CancellationReasons[1].Code == "ConditionalCheckFailed":
+				return &model.CustomError{
+					ErrorCode:   model.ErrorNoMatch,
+					ErrorDetail: fmt.Sprintf("userID=%s", userID),
+				}
+			case len(v.CancellationReasons) > 2 && *v.CancellationReasons[2].Code == "ConditionalCheckFailed":
 				return &model.CustomError{
 					ErrorCode:   model.ErrorDuplicateID,
-					ErrorDetail: uuidString,
+					ErrorDetail: fmt.Sprintf("listID=%s,userID=%s", listID, userID),
 				}
 			}
+		default:
 			return err2
 		}
 	}
@@ -778,6 +812,33 @@ func (session *DBSession) DeleteItem(listID string, datetime string) error {
 				}
 			}
 		}
+		return err
+	}
+	return nil
+}
+
+// UpdateItem does blah
+func (session *DBSession) UpdateItem(listID string, datetime string, version int, description string) error {
+
+	input := &dynamodb.UpdateItemInput{
+		TableName: aws.String("items"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"list_id": {
+				S: aws.String(listID),
+			},
+			"datetime": {
+				S: aws.String(datetime),
+			},
+		},
+		UpdateExpression: aws.String("SET description = :d"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":d": {
+				S: aws.String(description),
+			},
+		}}
+
+	_, err := session.DynamoDBresource.UpdateItem(input)
+	if err != nil {
 		return err
 	}
 	return nil
