@@ -12,20 +12,20 @@ const (
 	ErrorDuplicateID
 )
 
-// User is an user...
+// User is a type
 type User struct {
 	ID    string `json:"id"`
 	Email string `json:"email"`
 }
 
-// List is blah blah
+// List is a type
 type List struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
 	UserID string `json:"user_id"`
 }
 
-// AggregateList is blah blah
+// AggregateList is a type
 type AggregateList struct {
 	List
 	GuestCount int
@@ -33,15 +33,19 @@ type AggregateList struct {
 	AsGuest    bool
 }
 
-// Guest is blah
+// Guest is a type
 type Guest struct {
 	ListID string `json:"list_id"`
 	UserID string `json:"user_id"`
-	// Field not populated directly from Table
-	AggregateEmail string
 }
 
-// Item does blah
+// AggregateGuest is a type
+type AggregateGuest struct {
+	Guest
+	Email string
+}
+
+// Item is a type
 type Item struct {
 	ListID      string `json:"list_id"`
 	Datetime    string `json:"datetime"`
@@ -77,7 +81,7 @@ func (e CustomError) Error() string {
 	return fmt.Sprintf("%s (%s)", description, e.ErrorDetail)
 }
 
-// Interface is magic
+// Interface is what it says on the tin
 type Interface interface {
 	ListUsers(lastUserID string, max int64) ([]User, string, error)
 	GetUsersByIDs(ids []string) ([]User, error)
@@ -87,7 +91,7 @@ type Interface interface {
 	GetListsByUserID(userID string) ([]List, error)
 	CreateList(userID string, title string) (string, error)
 	DeleteList(listID string, userID string) error
-	GetAggregateGuestsByListID(listID string) ([]Guest, error)
+	GetAggregateGuestsByListID(listID string) ([]AggregateGuest, error)
 	GetGuestsByListID(listID string) ([]Guest, error)
 	GetGuestsByUserID(userID string) ([]Guest, error)
 	CreateGuest(listID string, userID string) error
@@ -96,5 +100,5 @@ type Interface interface {
 	GetItemsByListID(listID string) ([]Item, error)
 	CreateItem(listID string, description string) error
 	DeleteItem(listID string, datetime string) error
-	UpdateItem(listID string, datetime string, version int, description string) error
+	UpdateItem(listID string, datetime string, version int, description *string, done *bool) (int, error)
 }

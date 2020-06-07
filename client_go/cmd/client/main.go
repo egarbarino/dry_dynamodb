@@ -1,17 +1,18 @@
 package main
 
 import (
-	"bufio"
+	"encoding/base64"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/chzyer/readline"
 	"github.com/egarbarino/dry_dynamodb/client_go/internal/database/dynamo"
 	"github.com/egarbarino/dry_dynamodb/client_go/internal/database/memory"
 	"github.com/egarbarino/dry_dynamodb/client_go/internal/model"
@@ -28,6 +29,7 @@ type UserSession struct {
 	lastCommand      string
 	sequenceList     []string
 	sequenceCounter  int
+	itemVersions     map[string]int
 }
 
 func help() {
@@ -49,30 +51,40 @@ func help() {
 		"   guest add UserID                     Add a guest to the list\n" +
 		"   guest remove UserID                  Remove guest from the list\n" +
 		"   items                                Show items in the list\n" +
-		"   item create description              Create a new item\n" +
-		"   item delete datetime                 Delete item by datetimem\n" +
-		"   item rename datetime new_description Change item's description\n")
+		"   item create DESCRIPTION              Create a new item\n" +
+		"   item delete DATETIME                 Delete item by datetimem\n" +
+		"   item tick DATETIME                   Set item as done\n" +
+		"   item untick DATETIME                 Set item as pending\n" +
+		"   item rename DATETIME DESCRIPTION     Change item's description\n")
 }
 
 func inputLoop(session *UserSession) {
 
-	var scanner *bufio.Scanner
-	var text string
 	session.sequenceCounter = 0
 	session.sequenceList = make([]string, 1000)
+	session.itemVersions = make(map[string]int)
+	var promptStr string
+	rl, err := readline.New("> ")
+	if err != nil {
+		panic(err)
+	}
+	defer rl.Close()
 
 	for {
-		fmt.Printf("%s|%s> ", session.loggedUser.Email, session.selectedList.Title)
-		scanner = bufio.NewScanner(os.Stdin)
-		if err := scanner.Err(); err != nil {
-			log.Fatal(err)
+		promptStr = ""
+		if session.loggedUser.Email != "" {
+			promptStr += session.loggedUser.Email
+		}
+		if session.selectedList.Title != "" {
+			promptStr += fmt.Sprintf("|%s", session.selectedList.Title)
+		}
+		promptStr += "> "
+		rl.SetPrompt(promptStr)
+
+		text, err := rl.Readline()
+		if err != nil { // io.EOF
 			break
 		}
-		if !scanner.Scan() {
-			log.Fatal("No lines")
-			break
-		}
-		text = scanner.Text()
 
 		// Replace $1, $232, etc with saved data
 
@@ -169,7 +181,7 @@ func inputLoop(session *UserSession) {
 		// Lists
 		case strings.HasPrefix(text, "lists"):
 			if session.loggedUser.Email == "" {
-				fmt.Println("This command requires a logged user via the login command")
+				fmt.Println("This command requires a current user via the 'user UserID' command")
 				break
 			}
 			lists, err := session.backend.GetAggregateListsByUserID(session.loggedUser.ID)
@@ -201,7 +213,7 @@ func inputLoop(session *UserSession) {
 		// List Create
 		case strings.HasPrefix(text, "list create"):
 			if session.loggedUser.ID == "" {
-				fmt.Println("This command requires a logged user via the login command")
+				fmt.Println("This command requires a current user via the 'user UserID' command")
 				break
 			}
 			if len(text) < len("list create _") {
@@ -219,7 +231,7 @@ func inputLoop(session *UserSession) {
 		// List Delete
 		case strings.HasPrefix(text, "list delete"):
 			if session.loggedUser.ID == "" {
-				fmt.Println("This command requires a logged user via the login command")
+				fmt.Println("This command requires a current user via the 'user UserID' command")
 				break
 			}
 			if len(text) < len("list delete _") {
@@ -227,11 +239,23 @@ func inputLoop(session *UserSession) {
 				break
 			}
 			listID := text[len("list delete "):]
+
+			list, err := session.backend.GetListByListID(listID)
+			if err != nil {
+				fmt.Println(err)
+			}
+			if list.UserID != session.loggedUser.ID {
+				fmt.Println("This list doesn't belong to you!")
+				break
+			}
 			if err := session.backend.DeleteList(listID, session.loggedUser.ID); err != nil {
 				fmt.Println(err)
 				break
 			}
 			fmt.Printf("List %s deleted\n", listID)
+			if listID == session.selectedList.ID {
+				session.selectedList = model.List{}
+			}
 
 		// Guests
 		case strings.HasPrefix(text, "guests"):
@@ -252,7 +276,7 @@ func inputLoop(session *UserSession) {
 				fmt.Printf("%-4s %-37s  %-50s\n", "Seq", "UserID", "Email")
 				fmt.Printf("%-4s %-37s  %-50s\n", "---", "------", "-----")
 				for _, guest := range guests {
-					fmt.Printf("%3d  %-37s  %-50s\n", session.sequenceCounter, guest.UserID, guest.AggregateEmail)
+					fmt.Printf("%3d  %-37s  %-50s\n", session.sequenceCounter, guest.UserID, guest.Email)
 					session.sequenceList[session.sequenceCounter] = guest.UserID
 					session.sequenceCounter++
 
@@ -352,8 +376,8 @@ func inputLoop(session *UserSession) {
 
 				var done string
 
-				fmt.Printf("%-3s %-27s %-6s %-7s %s\n", "Seq", "Datetime", "Version", "Done", "Description")
-				fmt.Printf("%-3s %-27s %-6s %-7s %s\n", "---", "--------", "-------", "----", "-----------")
+				fmt.Printf("%-3s %-27s %-7s %-7s %s\n", "Seq", "Datetime", "Version", "Done", "Description")
+				fmt.Printf("%-3s %-27s %-7s %-7s %s\n", "---", "--------", "-------", "----", "-----------")
 
 				for _, item := range items {
 					if item.Done {
@@ -361,7 +385,9 @@ func inputLoop(session *UserSession) {
 					} else {
 						done = "Pending"
 					}
-					fmt.Printf("%3d %-27s %-6d %-7s %s\n", session.sequenceCounter, item.Datetime, item.Version, done, item.Description)
+
+					fmt.Printf("%3d %-27s %7d %-7s %s\n", session.sequenceCounter, item.Datetime, item.Version, done, item.Description)
+					session.itemVersions[item.Datetime] = item.Version
 					session.sequenceList[session.sequenceCounter] = item.Datetime
 					session.sequenceCounter++
 				}
@@ -409,6 +435,48 @@ func inputLoop(session *UserSession) {
 				break
 			}
 
+		case strings.HasPrefix(text, "item tick"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("item tick _") {
+				fmt.Println("No datetime specified")
+				break
+			}
+			datetime := text[len("item tick "):]
+			newVersion, err := session.backend.UpdateItem(session.selectedList.ID, datetime, session.itemVersions[datetime], nil, aws.Bool(true))
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+			session.itemVersions[datetime] = newVersion
+
+		case strings.HasPrefix(text, "item untick"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("item untick _") {
+				fmt.Println("No datetime specified")
+				break
+			}
+			datetime := text[len("item untick "):]
+			newVersion, err := session.backend.UpdateItem(session.selectedList.ID, datetime, session.itemVersions[datetime], nil, aws.Bool(false))
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+			session.itemVersions[datetime] = newVersion
+
 		case strings.HasPrefix(text, "item rename"):
 			if session.loggedUser.ID == "" {
 				fmt.Println("This command requires a current user via the 'user UserID' command")
@@ -424,17 +492,18 @@ func inputLoop(session *UserSession) {
 			}
 			argumentStr := text[len("item rename "):]
 			arguments := strings.Split(argumentStr, " ")
-			if len(arguments) != 2 {
+			if len(arguments) < 2 {
 				fmt.Println("Invalid number of arguments")
 				break
 			}
 			datetime := arguments[0]
-			description := arguments[1]
-			err := session.backend.UpdateItem(session.selectedList.ID, datetime, 0, description)
+			description := strings.Join(arguments[1:], " ")
+			newVersion, err := session.backend.UpdateItem(session.selectedList.ID, datetime, session.itemVersions[datetime], &description, nil)
 			if err != nil {
 				fmt.Println(err)
 				break
 			}
+			session.itemVersions[datetime] = newVersion
 
 		// Exit
 		case strings.HasPrefix(text, "exit"):
@@ -455,6 +524,25 @@ func inputLoop(session *UserSession) {
 
 func main() {
 
+	datetime := time.Now().Format("2006-01-02T15:04:05.999999")
+	fmt.Println(datetime)
+	result, err := time.Parse("2006-01-02T15:04:05.999999", datetime)
+	reconverted := time.Unix(0, result.UnixNano())
+
+	fmt.Println(reconverted.Format("2006-01-02T15:04:05.999999"))
+	//	unixTime := time.Unix()
+	//	fmt.Printf("%d\n", unixTime)
+
+	data := []byte("any + old & data")
+	str := base64.StdEncoding.EncodeToString(data)
+	fmt.Println(str)
+	bytes, err := base64.StdEncoding.DecodeString(str)
+	fmt.Println(string(bytes))
+	fmt.Println(err)
+	if false {
+		return
+	}
+
 	var backend model.Interface
 
 	fmt.Print("*** Todo List Application ***\n")
@@ -471,6 +559,7 @@ func main() {
 			},
 		}))
 		backend = &dynamo.DBSession{DynamoDBresource: dynamodb.New(session)}
+
 	}
 
 	help()

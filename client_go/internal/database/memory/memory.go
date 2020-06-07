@@ -135,8 +135,8 @@ func (memorySession *Session) GetListByListID(listID string) (model.List, error)
 }
 
 // GetAggregateGuestsByListID does blah
-func (memorySession *Session) GetAggregateGuestsByListID(listID string) ([]model.Guest, error) {
-	return []model.Guest{}, &model.CustomError{
+func (memorySession *Session) GetAggregateGuestsByListID(listID string) ([]model.AggregateGuest, error) {
+	return []model.AggregateGuest{}, &model.CustomError{
 		ErrorCode:   model.ErrorUnimplemented,
 		ErrorDetail: "Interface.GetAggregateGuestsByUserID",
 	}
@@ -207,8 +207,8 @@ func (memorySession *Session) DeleteItem(listID string, datetime string) error {
 }
 
 // UpdateItem does ..
-func (memorySession *Session) UpdateItem(listID string, datetime string, version int, description string) error {
-	return &model.CustomError{
+func (memorySession *Session) UpdateItem(listID string, datetime string, version int, description *string, done *bool) (int, error) {
+	return 0, &model.CustomError{
 		ErrorCode:   model.ErrorUnimplemented,
 		ErrorDetail: "Interface.UpdateItem",
 	}
