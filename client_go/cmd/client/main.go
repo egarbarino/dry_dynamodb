@@ -1,26 +1,31 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
+	"log"
+	"math/rand"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/buger/goterm"
 	"github.com/chzyer/readline"
 	"github.com/egarbarino/dry_dynamodb/client_go/internal/database/dynamo"
 	"github.com/egarbarino/dry_dynamodb/client_go/internal/database/memory"
 	"github.com/egarbarino/dry_dynamodb/client_go/internal/model"
+	"syreclabs.com/go/faker"
 )
 
 const maxResults = 5
 
-// UserSession does blah blah
+// UserSession maintains contextual settings and data
 type UserSession struct {
 	backend          model.Interface
 	loggedUser       model.User
@@ -30,6 +35,180 @@ type UserSession struct {
 	sequenceList     []string
 	sequenceCounter  int
 	itemVersions     map[string]int
+	createRatio      int
+	updateRatio      int
+	tickRatio        int
+}
+
+func simulateInteraction(session *UserSession, threads int, runs int) error {
+
+	if threads < 1 {
+		threads = 1
+	}
+	if runs < 1 {
+		runs = 1
+	}
+
+	var mutex sync.Mutex
+	var currentItems []model.Item
+	var globalCounter int32 = 0
+	var itemCounter int32 = 0
+	var itemErrorCounter int32 = 0
+	var createCounter int32 = 0
+	var createErrorCounter int32 = 0
+	var deleteCounter int32 = 0
+	var deleteErrorCounter int32 = 0
+	var tickCounter int32 = 0
+	var tickErrorCounter int32 = 0
+	var updateCounter int32 = 0
+	var updateErrorCounter int32 = 0
+
+	interact := func(session *UserSession) {
+		for i := 0; i < runs; i++ {
+			items, err := session.backend.GetItemsByListID(session.selectedList.ID)
+			if err != nil {
+				atomic.AddInt32(&itemErrorCounter, 1)
+				atomic.AddInt32(&globalCounter, 1)
+				log.Printf("GetItemsByListID Error: %v", err)
+			}
+			mutex.Lock()
+			currentItems = items
+			mutex.Unlock()
+			atomic.AddInt32(&itemCounter, 1)
+			atomic.AddInt32(&globalCounter, 1)
+
+			if len(items) < 2 {
+				errorStr := "Aborting: Please set up a list with a least five items!"
+				fmt.Println(errorStr)
+				panic(errorStr)
+			}
+
+			randomItem := items[rand.Intn(len(items))]
+
+			randomNumber := rand.Intn(100)
+			switch {
+			// Create a new item and delete some other from the list
+			case session.createRatio != 0 && randomNumber < session.createRatio:
+
+				if err := session.backend.DeleteItem(session.selectedList.ID, randomItem.Datetime); err != nil {
+					atomic.AddInt32(&deleteErrorCounter, 1)
+					atomic.AddInt32(&globalCounter, 1)
+					log.Printf("DeleteItem Error: %v", err)
+					break
+				}
+				atomic.AddInt32(&deleteCounter, 1)
+				atomic.AddInt32(&globalCounter, 1)
+
+				for j := 0; j < 5; j++ {
+					description := faker.Hacker().Verb() + " " + faker.Hacker().Noun()
+					if err := session.backend.CreateItem(session.selectedList.ID, description); err != nil {
+						atomic.AddInt32(&createErrorCounter, 1)
+						atomic.AddInt32(&globalCounter, 1)
+						log.Printf("CreateItem Error Attempt #%d: %v", j, err)
+					} else {
+						break
+					}
+				}
+				atomic.AddInt32(&createCounter, 1)
+				atomic.AddInt32(&globalCounter, 1)
+
+			// Update Description
+			case session.updateRatio != 0 && randomNumber >= session.createRatio && randomNumber < session.createRatio+session.updateRatio:
+				description := faker.Hacker().Verb() + " " + faker.Hacker().Noun()
+				_, err := session.backend.UpdateItem(session.selectedList.ID, randomItem.Datetime, randomItem.Version, aws.String(description), nil)
+				if err != nil {
+					atomic.AddInt32(&updateErrorCounter, 1)
+					atomic.AddInt32(&globalCounter, 1)
+					log.Printf("UpdateItem Error: %v", err)
+				}
+				atomic.AddInt32(&updateCounter, 1)
+				atomic.AddInt32(&globalCounter, 1)
+
+			// Tick/Untick an item
+			case session.tickRatio != 0 && randomNumber >= (session.createRatio+session.updateRatio) && randomNumber < session.createRatio+session.updateRatio+session.tickRatio:
+				_, err := session.backend.UpdateItem(session.selectedList.ID, randomItem.Datetime, randomItem.Version, nil, aws.Bool(!randomItem.Done))
+				if err != nil {
+					atomic.AddInt32(&tickErrorCounter, 1)
+					atomic.AddInt32(&globalCounter, 1)
+					log.Printf("UpdateItem Error: %v", err)
+				}
+				atomic.AddInt32(&tickCounter, 1)
+				atomic.AddInt32(&globalCounter, 1)
+
+			}
+		}
+	}
+	start := time.Now()
+	for i := 0; i < threads; i++ {
+		go interact(session)
+	}
+	goterm.Clear()
+	goterm.MoveCursor(1, 1)
+	goterm.Printf("%s (%s)\n",
+		session.loggedUser.Email,
+		session.loggedUser.ID)
+	goterm.Printf("Threads: %d - Runs per Thread: %d (Total: %d)\n", threads, runs, threads*runs)
+
+	for {
+		itemCounter := atomic.LoadInt32(&itemCounter)
+		goterm.MoveCursor(1, 3)
+		counter := atomic.LoadInt32(&globalCounter)
+		elapsed := int32(time.Now().Sub(start).Seconds())
+		if elapsed == 0 {
+			elapsed = 1
+		}
+		goterm.Printf("Time: %02d:%02d:%02d | Elpased: %ds | Unique Interactions: %d (%d/sec) \n",
+			time.Now().Hour(),
+			time.Now().Minute(),
+			time.Now().Second(),
+			elapsed,
+			counter,
+			counter/elapsed)
+
+		goterm.Printf("   Runs/Get Items: OK %-4d | ERR: %-4d \n",
+			itemCounter,
+			atomic.LoadInt32(&itemErrorCounter))
+		goterm.Printf("     Create Items: OK %-4d | ERR: %-4d (Ratio: %d%%) [Includes Delete]  \n",
+			atomic.LoadInt32(&createCounter),
+			atomic.LoadInt32(&createErrorCounter),
+			session.createRatio)
+		goterm.Printf("     Delete Items: OK %-4d | ERR: %-4d \n",
+			atomic.LoadInt32(&deleteCounter),
+			atomic.LoadInt32(&deleteErrorCounter))
+		goterm.Printf("     Rename Items: OK %-4d | ERR: %-4d (Ratio: %d%%) \n",
+			atomic.LoadInt32(&updateCounter),
+			atomic.LoadInt32(&updateErrorCounter),
+			session.updateRatio)
+		goterm.Printf("Tick/Untick Items: OK %-4d | ERR: %-4d (Ratio: %d%%) \n",
+			atomic.LoadInt32(&tickCounter),
+			atomic.LoadInt32(&tickErrorCounter),
+			session.tickRatio)
+		goterm.Printf("---------------------------------------------------------------\n")
+		goterm.Printf("%-27s %-7s %-7s %s\n", "Datetime", "Version", "Done", "Description")
+		goterm.Printf("%-27s %-7s %-7s %s\n", "--------", "-------", "----", "-----------")
+		var done string
+		for _, item := range currentItems {
+			if item.Done {
+				done = "Done"
+			} else {
+				done = "Pending"
+			}
+			goterm.Printf("%-27s %7d %-7s %-40s\n", item.Datetime, item.Version, done, item.Description)
+		}
+		for j := 1; j < 5; j++ {
+			goterm.Printf("%-65s\n", "")
+		}
+		goterm.Flush()
+		time.Sleep(100 * time.Millisecond)
+
+		if int(itemCounter) >= threads*runs {
+			fmt.Println("Ending (5 second cool down)")
+			time.Sleep(5 * time.Second)
+			break
+		}
+
+	}
+	return nil
 }
 
 func help() {
@@ -40,6 +219,7 @@ func help() {
 		"   user UserID                          Select UserID\n" +
 		"   email user@domain.com                Select User by Email\n" +
 		"   seq                                  Reset sequence counter\n" +
+		"   slow SECONDS                         Delay DB operations\n" +
 		"   exit                                 Exit application\n" +
 		"Once a user is selected\n" +
 		"   lists                                Show User's To Do lists\n" +
@@ -55,7 +235,9 @@ func help() {
 		"   item delete DATETIME                 Delete item by datetimem\n" +
 		"   item tick DATETIME                   Set item as done\n" +
 		"   item untick DATETIME                 Set item as pending\n" +
-		"   item rename DATETIME DESCRIPTION     Change item's description\n")
+		"   item rename DATETIME DESCRIPTION     Change item's description\n" +
+		"   interact THREADS RUNS_PER_THREAD     Interact with list automatically\n" +
+		"   ratio CREATE UPDATE TICK_UNTICK      Ratio (integer) for interact actions\n")
 }
 
 func inputLoop(session *UserSession) {
@@ -101,8 +283,21 @@ func inputLoop(session *UserSession) {
 				text = strings.ReplaceAll(text, v, session.sequenceList[n])
 			}
 		}
-
 		switch {
+
+		case strings.HasPrefix(text, "slow"):
+			if len(text) < len("slow _") {
+				fmt.Println("No arguments provided")
+				break
+			}
+			argumentStr := text[len("slow "):]
+			if n, err := strconv.Atoi(argumentStr); err == nil {
+				session.backend.Slowdown(n)
+			} else {
+				fmt.Printf("%s is not a number\n", argumentStr)
+			}
+			break
+
 		// Help
 		case strings.HasPrefix(text, "help") || text == "":
 			help()
@@ -505,6 +700,71 @@ func inputLoop(session *UserSession) {
 			}
 			session.itemVersions[datetime] = newVersion
 
+		case strings.HasPrefix(text, "interact"):
+			if session.loggedUser.ID == "" {
+				fmt.Println("This command requires a current user via the 'user UserID' command")
+				break
+			}
+			if session.selectedList.ID == "" {
+				fmt.Println("This command requires a selected list via the 'list ListID' command")
+				break
+			}
+			if len(text) < len("interact _") {
+				fmt.Println("No arguments provided")
+				break
+			}
+			argumentStr := text[len("interact "):]
+			arguments := strings.Split(argumentStr, " ")
+			if len(arguments) < 2 {
+				fmt.Println("Invalid number of arguments")
+				break
+			}
+			var threads int
+			var runs int
+			if n, err := strconv.Atoi(arguments[0]); err == nil {
+				threads = n
+			} else {
+				fmt.Printf("%s is not a number\n", arguments[0])
+			}
+			if n, err := strconv.Atoi(arguments[1]); err == nil {
+				runs = n
+			} else {
+				fmt.Printf("%s is not a number\n", arguments[1])
+			}
+
+			if err := simulateInteraction(session, threads, runs); err != nil {
+				fmt.Println(err)
+				break
+			}
+		case strings.HasPrefix(text, "ratio"):
+			if len(text) < len("ratio _") {
+				fmt.Println("No arguments provided")
+				break
+			}
+			argumentStr := text[len("ratio "):]
+			arguments := strings.Split(argumentStr, " ")
+			if len(arguments) < 3 {
+				fmt.Println("Invalid number of arguments")
+				break
+			}
+			if n, err := strconv.Atoi(arguments[0]); err == nil {
+				session.createRatio = n
+			} else {
+				fmt.Printf("%s is not a number\n", arguments[0])
+			}
+
+			if n, err := strconv.Atoi(arguments[1]); err == nil {
+				session.updateRatio = n
+			} else {
+				fmt.Printf("%s is not a number\n", arguments[1])
+			}
+
+			if n, err := strconv.Atoi(arguments[2]); err == nil {
+				session.tickRatio = n
+			} else {
+				fmt.Printf("%s is not a number\n", arguments[2])
+			}
+
 		// Exit
 		case strings.HasPrefix(text, "exit"):
 			return
@@ -524,40 +784,25 @@ func inputLoop(session *UserSession) {
 
 func main() {
 
-	datetime := time.Now().Format("2006-01-02T15:04:05.999999")
-	fmt.Println(datetime)
-	result, err := time.Parse("2006-01-02T15:04:05.999999", datetime)
-	reconverted := time.Unix(0, result.UnixNano())
-
-	fmt.Println(reconverted.Format("2006-01-02T15:04:05.999999"))
-	//	unixTime := time.Unix()
-	//	fmt.Printf("%d\n", unixTime)
-
-	data := []byte("any + old & data")
-	str := base64.StdEncoding.EncodeToString(data)
-	fmt.Println(str)
-	bytes, err := base64.StdEncoding.DecodeString(str)
-	fmt.Println(string(bytes))
-	fmt.Println(err)
-	if false {
-		return
-	}
-
 	var backend model.Interface
 
-	fmt.Print("*** Todo List Application ***\n")
+	fmt.Print("*** Todo List Application ***\n\n")
 	fmt.Print("Usage: ./client memory | ./client (default using DynamoDB)\n")
 	if len(os.Args) > 1 && os.Args[1] == "memory" {
 		fmt.Print("\nMemory backend selected\n\n")
 		backend = memory.New()
 	} else {
 		fmt.Print("\nDynamoDB backend selected\n\n")
-		session := session.Must(session.NewSessionWithOptions(session.Options{
-			Profile: "dynamodb_profile",
-			Config: aws.Config{
-				Region: aws.String("eu-west-2"),
-			},
-		}))
+
+		var session *session.Session = session.Must(
+			session.NewSessionWithOptions(
+				session.Options{
+					Profile: "dynamodb_profile",
+					Config: aws.Config{
+						Region: aws.String("eu-west-2"),
+					},
+				}))
+
 		backend = &dynamo.DBSession{DynamoDBresource: dynamodb.New(session)}
 
 	}

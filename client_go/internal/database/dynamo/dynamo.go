@@ -18,6 +18,7 @@ import (
 // DBSession is a type
 type DBSession struct {
 	DynamoDBresource *dynamodb.DynamoDB
+	slowdownSeconds  int
 }
 
 func validateQueryOutputCount(count int64, output *dynamodb.QueryOutput) error {
@@ -43,9 +44,22 @@ func logEnd(method string, start time.Time) {
 	log.Printf("%s Time (%dms)", method, end.Milliseconds())
 }
 
+func slowdown(session *DBSession, method string, description string) {
+	if session.slowdownSeconds > 0 {
+		log.Printf("%s (%s) Sleeping for %d seconds", method, description, session.slowdownSeconds)
+		time.Sleep(time.Duration(session.slowdownSeconds) * time.Second)
+	}
+}
+
+// Slowdown is a method
+func (session *DBSession) Slowdown(seconds int) {
+	session.slowdownSeconds = seconds
+}
+
 // ListUsers is a method
 func (session *DBSession) ListUsers(lastUserID string, max int64) ([]model.User, string, error) {
 	const method = "ListUsers"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (lastUserId=%s,max=%d)", method, lastUserID, max)
 	var exclusiveStartKey map[string]*dynamodb.AttributeValue
@@ -91,6 +105,7 @@ func (session *DBSession) ListUsers(lastUserID string, max int64) ([]model.User,
 // GetUsersByIDs is a method
 func (session *DBSession) GetUsersByIDs(ids []string) ([]model.User, error) {
 	const method = "GetUsersByIDs"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (ids=%v)", method, ids)
 	var keys = make([]map[string]*dynamodb.AttributeValue, len(ids))
@@ -133,6 +148,7 @@ func (session *DBSession) GetUsersByIDs(ids []string) ([]model.User, error) {
 // GetUserByEmail is a method
 func (session *DBSession) GetUserByEmail(email string) (model.User, error) {
 	const method = "GetUserByEmail"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (email=%s)", method, email)
 	svc := session.DynamoDBresource
@@ -178,6 +194,7 @@ func (session *DBSession) GetUserByEmail(email string) (model.User, error) {
 func (session *DBSession) GetAggregateListsByUserID(userID string) ([]model.AggregateList, error) {
 
 	const method = "GetAggregateListsByUserID"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (userID=%s)", method, userID)
 
@@ -306,9 +323,11 @@ func (session *DBSession) GetAggregateListsByUserID(userID string) ([]model.Aggr
 // GetListsByUserID is a method
 func (session *DBSession) GetListsByUserID(userID string) ([]model.List, error) {
 	const method = "GetListsByUserID"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (userID=%s)", method, userID)
-	svc := session.DynamoDBresource
+	dynamoDB := session.DynamoDBresource
+
 	input := &dynamodb.QueryInput{
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":v1": {
@@ -322,10 +341,11 @@ func (session *DBSession) GetListsByUserID(userID string) ([]model.List, error) 
 		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 	}
 
-	output, err := svc.Query(input)
+	output, err := dynamoDB.Query(input)
 	if err != nil {
 		return []model.List{}, err
 	}
+
 	logConsumedCapacity(method, output.ConsumedCapacity)
 
 	var lists = make([]model.List, *output.Count)
@@ -342,6 +362,7 @@ func (session *DBSession) GetListsByUserID(userID string) ([]model.List, error) 
 func (session *DBSession) CreateList(userID string, title string) (string, error) {
 
 	const method = "CreateList"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (userID=%s,title=%s)", method, userID, title)
 
@@ -397,6 +418,8 @@ func (session *DBSession) CreateList(userID string, title string) (string, error
 					ErrorCode:   model.ErrorDuplicateID,
 					ErrorDetail: fmt.Sprintf("listID=%s", uuidString),
 				}
+			default:
+				return "", err2
 			}
 		default:
 			return "", err2
@@ -411,6 +434,7 @@ func (session *DBSession) CreateList(userID string, title string) (string, error
 // DeleteList is a method
 func (session *DBSession) DeleteList(listID string, userID string) error {
 	const method = "DeleteList"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s,userID=%s)", method, listID, userID)
 	//
@@ -418,6 +442,7 @@ func (session *DBSession) DeleteList(listID string, userID string) error {
 	// the `under_deletion` attribute
 	//
 	log.Printf("Preparing list %s for deletion", listID)
+	slowdown(session, method, "before setting under_deletion")
 	input := &dynamodb.TransactWriteItemsInput{
 		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 		TransactItems: []*dynamodb.TransactWriteItem{
@@ -467,6 +492,7 @@ func (session *DBSession) DeleteList(listID string, userID string) error {
 		return err
 	}
 	if len(items) > 0 {
+		slowdown(session, method, "before deleting items")
 		deleteWriteRequests := make([]*dynamodb.WriteRequest, 0)
 
 		for _, item := range items {
@@ -507,6 +533,7 @@ func (session *DBSession) DeleteList(listID string, userID string) error {
 	// Finally, delete the list
 	//
 	log.Printf("Deleting list %s", listID)
+	slowdown(session, method, "before deleting list")
 	input3 := &dynamodb.DeleteItemInput{
 		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 		TableName:              aws.String("lists"),
@@ -542,6 +569,7 @@ func (session *DBSession) DeleteList(listID string, userID string) error {
 // GetListByListID is blah
 func (session *DBSession) GetListByListID(listID string) (model.List, error) {
 	const method = "GetListByListID"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s)", method, listID)
 	input := &dynamodb.GetItemInput{
@@ -573,9 +601,10 @@ func (session *DBSession) GetListByListID(listID string) (model.List, error) {
 	return list, nil
 }
 
-// GetListsByIDs is blah
+// GetListsByIDs is a method
 func (session *DBSession) GetListsByIDs(ids []string) ([]model.List, error) {
 	const method = "GetListsByIDs"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (ids=%v)", method, ids)
 	var keys = make([]map[string]*dynamodb.AttributeValue, len(ids))
@@ -617,6 +646,7 @@ func (session *DBSession) GetListsByIDs(ids []string) ([]model.List, error) {
 // GetAggregateGuestsByListID is a method
 func (session *DBSession) GetAggregateGuestsByListID(listID string) ([]model.AggregateGuest, error) {
 	const method = "GetAggregateGuestsByListID"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s)", method, listID)
 	guests, err := session.GetGuestsByListID(listID)
@@ -649,6 +679,7 @@ func (session *DBSession) GetAggregateGuestsByListID(listID string) ([]model.Agg
 // GetGuestsByListID is a method
 func (session *DBSession) GetGuestsByListID(listID string) ([]model.Guest, error) {
 	const method = "GetGuestsByListID"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%v)", method, listID)
 	input := &dynamodb.QueryInput{
@@ -681,6 +712,7 @@ func (session *DBSession) GetGuestsByListID(listID string) ([]model.Guest, error
 // GetGuestsByUserID is a method
 func (session *DBSession) GetGuestsByUserID(userID string) ([]model.Guest, error) {
 	const method = "GetGuestsByUserID"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (userID=%s)", method, userID)
 	input := &dynamodb.QueryInput{
@@ -713,6 +745,7 @@ func (session *DBSession) GetGuestsByUserID(userID string) ([]model.Guest, error
 // IsPresentGuest is a method
 func (session *DBSession) IsPresentGuest(listID string, userID string) (bool, error) {
 	const method = "IsPresentGuest"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s,userID=%s)", method, listID, userID)
 	input := &dynamodb.GetItemInput{
@@ -741,6 +774,7 @@ func (session *DBSession) IsPresentGuest(listID string, userID string) (bool, er
 // CreateGuest is a method
 func (session *DBSession) CreateGuest(listID string, userID string) error {
 	const method = "CreateGuest"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s,userID=%s)", method, listID, userID)
 	guest := model.Guest{
@@ -812,6 +846,8 @@ func (session *DBSession) CreateGuest(listID string, userID string) error {
 					ErrorCode:   model.ErrorDuplicateID,
 					ErrorDetail: fmt.Sprintf("listID=%s,userID=%s", listID, userID),
 				}
+			default:
+				return err2
 			}
 		default:
 			return err2
@@ -824,6 +860,7 @@ func (session *DBSession) CreateGuest(listID string, userID string) error {
 func (session *DBSession) DeleteGuest(listID string, userID string) error {
 
 	const method = "DeleteGuest"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s,userID=%s)", method, listID, userID)
 
@@ -870,6 +907,7 @@ func (session *DBSession) DeleteGuest(listID string, userID string) error {
 func (session *DBSession) GetItemsByListID(listID string) ([]model.Item, error) {
 
 	const method = "GetItemsByListID"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s)", method, listID)
 
@@ -905,6 +943,7 @@ func (session *DBSession) GetItemsByListID(listID string) ([]model.Item, error) 
 func (session *DBSession) CreateItem(listID string, description string) error {
 
 	const method = "CreateItem"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s,description=%s)", method, listID, description)
 
@@ -964,6 +1003,8 @@ func (session *DBSession) CreateItem(listID string, description string) error {
 					ErrorCode:   model.ErrorDuplicateID,
 					ErrorDetail: fmt.Sprintf("listID=%s,datetime=%s", listID, datetime),
 				}
+			default:
+				return err2
 			}
 		default:
 			return err2
@@ -979,6 +1020,7 @@ func (session *DBSession) CreateItem(listID string, description string) error {
 func (session *DBSession) DeleteItem(listID string, datetime string) error {
 
 	const method = "CreateList"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s,listID=%s)", method, listID, datetime)
 
@@ -1027,6 +1069,7 @@ func (session *DBSession) DeleteItem(listID string, datetime string) error {
 func (session *DBSession) UpdateItem(listID string, datetime string, version int, description *string, done *bool) (int, error) {
 
 	const method = "UpdateItem"
+	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (listID=%s,datetime=%s)", method, listID, datetime)
 

@@ -28,12 +28,7 @@ resource "aws_dynamodb_table" "dynamodb-table-users" {
     projection_type    = "INCLUDE"
     non_key_attributes = ["email"]
   }
-  /*
-  tags = {
-    Name        = "dynamodb-table-1"
-    Environment = "production"
-  }
-  */
+
 }
 
 resource "aws_dynamodb_table" "dynamodb-table-guests" {

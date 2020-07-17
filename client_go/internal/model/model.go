@@ -19,6 +19,7 @@ type User struct {
 }
 
 // List is a type
+
 type List struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
@@ -83,6 +84,7 @@ func (e CustomError) Error() string {
 
 // Interface is what it says on the tin
 type Interface interface {
+	Slowdown(seconds int)
 	ListUsers(lastUserID string, max int64) ([]User, string, error)
 	GetUsersByIDs(ids []string) ([]User, error)
 	GetUserByEmail(email string) (User, error)
