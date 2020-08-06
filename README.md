@@ -1,6 +1,5 @@
 ---
-title: A Dry Guide to DynamoDB
-abstract: "Learning DynamoDB using Terraform, Python, and Go."
+title: A Dry Guide to DynamoDB abstract: "Learning DynamoDB using Terraform, Python, and Go."
 author: Ernesto Garbarino
 date: 2020-06-12
 ---
@@ -8,6 +7,8 @@ date: 2020-06-12
 # Introduction
 
 This is a _dry_, project-based DynamoDB tutorial using Terraform, Python, and Go. It is dry in the sense that it is written in a bottom up fashion, facts are given a succinct account, and the low-level details are captured in the provided sample GitHub project, rather than as a blog narrative.
+
+The related you-tube video is found here:
 
 ## Why DynamoDB?
 
@@ -32,89 +33,85 @@ The choice of Terraform, Python, and Go abides to the following principles:
   * _AWS Lambda_ and _containers_ suitability: Fast start-up time, low CPU/memory resource consumption, and the ability to use any Go release given that binaries are precompiled and there is no separate language runtime.
   * Maintainability: Large projects are easy to manage when using a statically-typed language like Go. In this sense, it is more convenient than NodeJS and Python---but similar to C# or Java. 
   
+# Running the Project
 
+These are the instructions for running the project from a local machine. Running it from an EC2 box is easier if the reader understands how role-based authorisation works.
 
-Notes
+## Set up DynamoDB
 
-* Comments on region only
+### IAM User
 
-* Models
-  * Eventually consistent
-  * Strongly consistent
+1. Create an AWS IAM user with Create/Read/Write access privileges to DynamoDB, for example, by attaching the policy named `AmazonDynamoDBFullAccess`.
+2. Save the access key and the secret access key
 
-GetItem, Query, and Scan) provide a ConsistentRead parameter
+### IAM User Profile
 
+Set up a named profile for the new IAM user called `dynamodb_profile`. For example:
 
-* Encryption at REST
-    * AWS owned Customer Master Key(CMK)
-    * AWS managed CMK
-    * Customer managed CMK
+```
+> aws configure --profile dynamodb_profile
+AWS Access Key ID [None]: IAM_USER_ACCESS_KEY (Paste here)
+AWS Secret Access Key [None]: IAM_USER_SECRET_ACCESS_KEY (Paste here)
+Default region name [None]: eu-west-2
+Default output format [None]: yaml
+```
 
-* Backups
-    * On demand
-    * Continuous Backups (Point-in-time Recovery)
+### Create DynamoDB Tables Using Terraform
 
-* DynamoDB Time to Live (TTL)
+Get Terraform from https://www.terraform.io/ if not already installed, switch to the repo's root, and apply `main.tf` as follows: 
 
-* High availability and durability
-    * SSD Storage
-    * Automatically replicated across multiple AZs
-    * Multi-region replication
+```
+> terraform apply
+...
+Plan: 4 to add, 0 to change, 0 to destroy.
 
-* Concepts
-  * Tables
-  * Items
-  * Attributes
+Do you want to perform these actions?
+  Terraform will perform the actions described above.
+  Only 'yes' will be accepted to approve.
 
+  Enter a value: yes
+```
 
-* Data Types
-  * Scalar Types – A scalar type can represent exactly one value. The scalar types are number, string, binary, Boolean, and null.
+### Add Synthetic Data Using Python Script
 
-  * Document Types – A document type can represent a complex structure with nested attributes, such as you would find in a JSON document. The document types are list and map.
+Make sure Python3 is installed and add dependencies:
 
-  * Set Types – A set type can represent multiple scalar values. The set types are string set, number set, and binary set.
+```
+> pip3 install -r requirements.txt
+```
 
-* Partition Key
-* Sort Key
-* Composite Primary Key (Partition Key + Sort Key)
+Run the script:
 
-* Secondary Indexes
-  * Local Secondary Index
-  * Global Secondary Index
+```
+> python3 init_database.py
+```
 
-* Streams
-  * Before
-  * After
-  * Lambda Triggers
+# Run The Sample Todo List Application
 
-* Pricing schemes
-  * On-demand
-  * Provisioned (default, free-tier eligible)
+First build the application so that dependencies are obtained:
 
-* API
-  * Create
-    * PutItem
-    * BatchWriteItem
+```
+> cd client_go
+> go build 
+```
+## Using DynamoDB
 
-  * Read Data
-    * GetItem
-    * BatchGetItem
-    * Query
-    * Scan
+```
+> go run cmd/client/main.go 2> /tmp/log.txt
+```
 
-  * Update Data
-    * UpdateItem
+Logs can be checked on a separate console as follows:
 
-  * Delete Data
-    * DeleteItem
-    * BatchWriteItem
+```
+> tail -f /tmp/log.txt
+```
 
-  * Transactions
-    * TransactWriteItems
-    * TransactGetItems
+## Using the Memory Driver
 
+Please note that only the `users` and `email` commands are implemented.
 
-
-
+```
+> go run cmd/client/main.go memory 2> /tmp/log.txt
+```
 
 

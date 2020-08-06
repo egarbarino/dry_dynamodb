@@ -151,7 +151,8 @@ func (session *DBSession) GetUserByEmail(email string) (model.User, error) {
 	slowdown(session, method, "entry")
 	defer logEnd(method, time.Now())
 	log.Printf("%s (email=%s)", method, email)
-	svc := session.DynamoDBresource
+
+	// Create Input
 	input := &dynamodb.QueryInput{
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":v1": {
@@ -164,11 +165,14 @@ func (session *DBSession) GetUserByEmail(email string) (model.User, error) {
 		IndexName:              aws.String("users_by_email"),
 		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 	}
-	output, err := svc.Query(input)
+
+	// Provide Input and obtain Output and Error
+	output, err := session.DynamoDBresource.Query(input)
 	if err != nil {
 		return model.User{}, err
 	}
 	logConsumedCapacity(method, output.ConsumedCapacity)
+
 	if *output.Count == 0 {
 		return model.User{}, &model.CustomError{
 			ErrorCode:   model.ErrorNoMatch,
@@ -179,8 +183,8 @@ func (session *DBSession) GetUserByEmail(email string) (model.User, error) {
 		return model.User{}, err2
 	}
 
+	// Map Output's results to Entity
 	var user model.User
-
 	if err3 := dynamodbattribute.UnmarshalMap(output.Items[0], &user); err3 != nil {
 		return model.User{}, err3
 	}

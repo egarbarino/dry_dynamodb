@@ -344,13 +344,12 @@ func inputLoop(session *UserSession) {
 				break
 			}
 			email := text[len("email "):]
-			user, err := session.backend.GetUserByEmail(email) // wgamble@fields.com
+			user, err := session.backend.GetUserByEmail(email)
 			if err != nil {
 				fmt.Println(err)
 				break
 			}
 			session.loggedUser = user
-			session.selectedList = model.List{}
 			break
 
 		// Select User by ID
@@ -784,13 +783,17 @@ func inputLoop(session *UserSession) {
 
 func main() {
 
+	// Abstract interface
 	var backend model.Interface
 
 	fmt.Print("*** Todo List Application ***\n\n")
 	fmt.Print("Usage: ./client memory | ./client (default using DynamoDB)\n")
 	if len(os.Args) > 1 && os.Args[1] == "memory" {
 		fmt.Print("\nMemory backend selected\n\n")
+
+		// Use Memory Implementation
 		backend = memory.New()
+
 	} else {
 		fmt.Print("\nDynamoDB backend selected\n\n")
 
@@ -803,6 +806,7 @@ func main() {
 					},
 				}))
 
+		// Use DynamoDB Implementation
 		backend = &dynamo.DBSession{DynamoDBresource: dynamodb.New(session)}
 
 	}

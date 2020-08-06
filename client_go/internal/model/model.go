@@ -2,16 +2,6 @@ package model
 
 import "fmt"
 
-// dbError Enumeration
-const (
-	ErrorNoMatch ErrorCode = iota
-	ErrorInvalidCount
-	ErrorMissingAttribute
-	ErrorMarshallingIssue
-	ErrorUnimplemented
-	ErrorDuplicateID
-)
-
 // User is a type
 type User struct {
 	ID    string `json:"id"`
@@ -19,7 +9,6 @@ type User struct {
 }
 
 // List is a type
-
 type List struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
@@ -55,6 +44,16 @@ type Item struct {
 	Order       int    `json:"order"`
 	Version     int    `json:"version"`
 }
+
+// dbError Enumeration
+const (
+	ErrorNoMatch ErrorCode = iota
+	ErrorInvalidCount
+	ErrorMissingAttribute
+	ErrorMarshallingIssue
+	ErrorUnimplemented
+	ErrorDuplicateID
+)
 
 // ErrorCode is used for the dbError... enumeration
 type ErrorCode int
