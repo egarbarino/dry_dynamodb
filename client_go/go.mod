@@ -9,5 +9,6 @@ require (
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
 	github.com/google/uuid v1.1.1
+	github.com/miguelmota/cointop v1.5.1 // indirect
 	syreclabs.com/go/faker v1.2.2
 )

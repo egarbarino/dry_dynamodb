@@ -114,4 +114,15 @@ Please note that only the `users` and `email` commands are implemented.
 > go run cmd/client/main.go memory 2> /tmp/log.txt
 ```
 
+# Exercises Left to the Reader
+
+## Transactional List Delete
+
+The `list delete` command is safe when it comes to taking care of items but not of guests. 
+
+1. Try the slowing down the execution using the `slow SECONDS` command and add a guest in the midst of a list deletion process.
+2. Fix the list delete code so that it deletes guests, in addition to items.
+3. Fix the `guest create` code so that it fails if a list is undergoing deletion.
+
+
 
