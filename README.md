@@ -1,9 +1,3 @@
----
-title: A Dry Guide to DynamoDB abstract: "Learning DynamoDB using Terraform, Python, and Go."
-author: Ernesto Garbarino
-date: 2020-06-12
----
-
 # Introduction
 
 This is a _dry_, project-based DynamoDB tutorial using Terraform, Python, and Go. It is dry in the sense that it is written in a bottom up fashion, facts are given a succinct account, and the low-level details are captured in the provided sample GitHub project, rather than as a blog narrative.
